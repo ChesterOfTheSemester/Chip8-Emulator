@@ -1,0 +1,59 @@
+<html>
+<head>
+    <script src="chip8.js"></script>
+
+    <style>
+        canvas, select {
+            display: block;w
+        }
+    </style>
+</head>
+
+<body>
+
+<canvas id="monitor"></canvas>
+
+<select id="gameSelect">
+    <option value="" disabled selected>Select a game</option>
+    <option>BRIX</option>
+    <option>15PUZZLE</option>
+    <option>BLINKY</option>
+    <option>BLITZ</option>
+    <option>CONNECT4</option>
+    <option>GUESS</option>
+    <option>HIDDEN</option>
+    <option>INVADERS</option>
+    <option>KALEID</option>
+    <option>MAZE</option>
+    <option>MERLIN</option>
+    <option>MISSILE</option>
+    <option>PONG</option>
+    <option>PONG2</option>
+    <option>PUZZLE</option>
+    <option>SYZYGY</option>
+    <option>TETRIS</option>
+    <option>TICTAC</option>
+    <option>UFO</option>
+    <option>VBRIX</option>
+    <option>VERS</option>
+    <option>WIPEOFF</option>
+</select>
+
+<script defer>
+    window.onload = function()
+    {
+        window.c8 = new Chip8({
+            canvas: document.getElementById("monitor"),
+            size: 5
+        });
+
+        document.querySelector("#gameSelect").onchange = function()
+        {
+            window.c8.loadROM("ROMs/" + this.value);
+            document.querySelector("#monitor").click();
+        }
+    }
+</script>
+
+</body>
+</html>
