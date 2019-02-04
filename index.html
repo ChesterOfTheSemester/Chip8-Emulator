@@ -3,55 +3,131 @@
     <script src="chip8.js"></script>
 
     <style>
-        canvas, select {
-            display: block;w
-        }
+        canvas { display: inline-block; }
+        textarea { display: inline-block; font-family: "Courier New"; min-height: 160px; }
+        .container { text-align: center; display: block; margin-bottom: 10px; width: 100%; }
+        h1, h2, h3 { font-family: "Courier New"; margin: 0; }
+        hr { margin-bottom: 10px; border: 0; }
+        a { color: inherit; text-decoration: inherit; }
+        a:hover { text-decoration: underline; }
+        select, button { display: inline-block; }
     </style>
 </head>
 
 <body>
 
-<canvas id="monitor"></canvas>
+<div class="container">
+    <h1>Chip-8 Emulator</h1>
+    <h3><a href="https://www.linkedin.com/in/chesterabrahams/">By Chester Abrahams</a></h3>
+    <hr>
+    <canvas id="monitor"></canvas>
+    <textarea id="debug" cols="20" rows="7"></textarea>
+</div>
 
-<select id="gameSelect">
-    <option value="" disabled selected>Select a game</option>
-    <option>BRIX</option>
-    <option>15PUZZLE</option>
-    <option>BLINKY</option>
-    <option>BLITZ</option>
-    <option>CONNECT4</option>
-    <option>GUESS</option>
-    <option>HIDDEN</option>
-    <option>INVADERS</option>
-    <option>KALEID</option>
-    <option>MAZE</option>
-    <option>MERLIN</option>
-    <option>MISSILE</option>
-    <option>PONG</option>
-    <option>PONG2</option>
-    <option>PUZZLE</option>
-    <option>SYZYGY</option>
-    <option>TETRIS</option>
-    <option>TICTAC</option>
-    <option>UFO</option>
-    <option>VBRIX</option>
-    <option>VERS</option>
-    <option>WIPEOFF</option>
-</select>
+<div class="container">
+    <select id="gameSelect">
+        <option value="" disabled selected>Select a game</option>
+        <option>BRIX</option>
+        <option>15PUZZLE</option>
+        <option>BLINKY</option>
+        <option>BLITZ</option>
+        <option>CONNECT4</option>
+        <option>GUESS</option>
+        <option>HIDDEN</option>
+        <option>INVADERS</option>
+        <option>KALEID</option>
+        <option>MAZE</option>
+        <option>MERLIN</option>
+        <option>MISSILE</option>
+        <option>PONG</option>
+        <option>PONG2</option>
+        <option>PUZZLE</option>
+        <option>SYZYGY</option>
+        <option>TETRIS</option>
+        <option>TICTAC</option>
+        <option>UFO</option>
+        <option>VBRIX</option>
+        <option>VERS</option>
+        <option>WIPEOFF</option>
+    </select>
+
+    <button id="pause">Pause</button>
+    <button id="restart">Restart</button>
+    <button id="exec">Execute</button>
+
+    <input type="range" id="hz" min="0" max="600" value="60" step="1"/>
+</div>
 
 <script defer>
     window.onload = function()
     {
         window.c8 = new Chip8({
             canvas: document.getElementById("monitor"),
-            size: 5
+            size: 5 // XY pixel size
         });
 
+        // Game select
         document.querySelector("#gameSelect").onchange = function()
         {
             window.c8.loadROM("ROMs/" + this.value);
             document.querySelector("#monitor").click();
-        }
+        };
+
+        // Change HZ, n/1000
+        document.querySelector("#hz").oninput = function()
+        {
+            c8.hz = this.value;
+        };
+
+        // Execute single instruction
+        document.querySelector("#exec").onclick = function()
+        {
+            c8.exec();
+        };
+
+        var debug = function()
+        {
+            let text = document.querySelector("#debug");
+
+            text.value = "";
+
+            let data = [
+                "PC", "opcode", "instr", "SP",
+                "X", "Y", "I",
+                "N", "NN",
+                "DT", "ST", "V6", "V7",
+                "V0", "V1", "V8", "V9",
+                "V2", "V3", "VA", "VB",
+                "V4", "V5", "VC", "VD",
+                "VE", "VF"
+            ];
+
+            // Report hz by default
+            text.value += "hz: " + c8.hz + "\n";
+
+            for (let i=0; i<data.length; i++)
+            {
+                text.value += data[i] + ": ";
+                c8[data[i]] && (text.value += "0x" + c8[data[i]].toString(16));
+                text.value += "\n";
+            }
+        };
+
+        // Pause, set playing to false
+        document.querySelector("#pause").onclick = function()
+        {
+            c8.playing = !c8.playing;
+            this.innerText = c8.playing ? "Pause" : "Play";
+            debug();
+        };
+
+        // Restart, reload chosen ROM
+        document.querySelector("#restart").onclick = function()
+        {
+            c8.loadROM("ROMs/" + document.querySelector("#gameSelect").value);
+        };
+
+        setInterval(debug, 1000/30);
     }
 </script>
 
