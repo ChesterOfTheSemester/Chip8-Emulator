@@ -11,13 +11,18 @@ class Chip8
     constructor(opt={})
     {
         this.initVM(opt);
-        this.initXPU(opt);
+        this.initGPU(opt);
 
-        setInterval(function()
+        let fn = function()
         {
-            for (let i=0; i<10; i++)
-                this.exec();
-        }.bind(this), 1000/60);
+            if (this.hz > 0)
+                for (let i=0; i<10; i++)
+                    this.cycle();
+
+            setTimeout(fn, 1000/(this.hz||60))
+        }.bind(this);
+
+        fn();
     }
 
     initVM(opt)
@@ -25,6 +30,7 @@ class Chip8
         this.opt = opt;
 
         this.playing = false;
+        this.hz = this.hz || 60; // Clock speed
 
         /**
          * Memory
@@ -41,7 +47,7 @@ class Chip8
         this.V = new Uint8Array(16);
         this.VF = 0;
         this.I = 0; // 16B
-        this.Stack = new Uint16Array(8);
+        this.stack = new Uint16Array(16);
         this.DT = this.ST = 0;
 
         /**
@@ -77,12 +83,12 @@ class Chip8
 
         // Use JS to convert keystring to keycode
         this.keyMap =
-        {
-            "1": 0x1, "2": 0x2, "a": 0x9, "s": 0xA,
-            "3": 0x3, "4": 0x4, "d": 0xB, "f": 0xC,
-            "q": 0x5, "w": 0x6, "j": 0xD, "X": 0xE,
-            "e": 0x7, "r": 0x8, "c": 0xF, "V": 0x10
-        };
+            {
+                "1": 0x1, "2": 0x2, "a": 0x9, "s": 0xA,
+                "3": 0x3, "4": 0x4, "d": 0xB, "f": 0xC,
+                "q": 0x5, "w": 0x6, "j": 0xD, "X": 0xE,
+                "e": 0x7, "r": 0x8, "c": 0xF, "V": 0x10
+            };
 
         // Key trigger event
         window.onkeydown = window.onkeyup = (e, i) =>
@@ -101,7 +107,7 @@ class Chip8
      * Handles graphics (GPU)
      * as well (sound)-timers (SPU)
      */
-    initXPU(opt)
+    initGPU(opt)
     {
         this.canvas = opt.canvas || document.createElement("canvas");
         this.ctx = this.canvas.getContext("2d");
@@ -115,34 +121,39 @@ class Chip8
          * Monochrome, so booleans are used
          */
         this.VRAM = new Array(64*32).fill(false);
+    }
 
-        // GPU clock
-        setInterval(function()
-        {
-            if (this.playing!==true) return false;
+    cycle()
+    {
+        this.exec();
+        this.xpuCycle();
+    }
 
-            if (this.drawFlag===true)
+    /**
+     * Draw & decrement timers
+     */
+    xpuCycle()
+    {
+        if (this.playing!==true) return false;
+
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Redraw pixels according their state
+        for (let y=0, C=0; y<32; y++)
+            for (let x=0; x<64; x++)
             {
-                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-                // Redraw pixels according their state
-                for (let y=0, C=0; y<32; y++)
-                    for (let x=0; x<64; x++)
-                    {
-                        this.ctx.fillStyle = this.VRAM[C++] ? "#FFFFFF" : "#000000";
-                        this.ctx.fillRect(
-                            this.size*x,
-                            this.size*y,
-                            this.size,
-                            this.size
-                        );
-                    }
+                this.ctx.fillStyle = this.VRAM[C++] ? "#FFFFFF" : "#000000";
+                this.ctx.fillRect(
+                    this.size*x,
+                    this.size*y,
+                    this.size,
+                    this.size
+                );
             }
 
-            // Decrement timers
-            if (this.DT>0) this.DT--;
-            if (this.ST>0 && this.ST-- && this.ST == 1) this.beep;
-        }.bind(this), 1000/60);
+        // Decrement timers
+        if (this.DT>0) this.DT--;
+        if (this.ST>0 && this.ST-- && this.ST === 1) this.beep;
     }
 
     clearScreen()
@@ -152,7 +163,7 @@ class Chip8
     }
 
     // Flip a pixel to opposite monochrome state
-    // Returns true on colision
+    // Returns true on collision
     flipPixel(x,y)
     {
         this.VRAM[x+64*y] = !this.VRAM[x+64*y];
@@ -165,8 +176,8 @@ class Chip8
     loadROM(URL)
     {
         let xhr = new XMLHttpRequest();
-            xhr.open("GET", URL, true);
-            xhr.responseType = "arraybuffer";
+        xhr.open("GET", URL, true);
+        xhr.responseType = "arraybuffer";
 
         xhr.onload = function()
         {
@@ -200,40 +211,57 @@ class Chip8
         this.ins = this.ins ||
         {
             0x0000 : () => opcode in this.ins && this.ins[opcode],
-            0x8000 : () => opcode in this.ins && this.ins[this.N],
-            0xE000 : () => opcode in this.ins && this.ins[this.NN],
-            0xF000 : () => opcode in this.ins && this.ins[this.NNN],
+            0x8000 : () =>
+            {
+                let tmp_ins = Object.assign(this.ins,
+                    {
+                        0x0000 : () => this.V[this.X] = this.V[this.Y], // 0XY0: Vx = Vy
+                        0x0007 : () =>                                  // 8XY7 : Vx = Vy, VF = NOT_BORROW
+                        {
+                            this.VF = +(this.V[this.Y] > this.V[this.X]);
+                            this.V[this.X] = this.V[this.Y] - this.V[this.X];
+                            if (this.V[this.X] < 0)
+                                this.V[this.X] += 0x100;
+                        }
+                    });
 
-            0x000A : () => {},                                                                  // Cba as we're not playing any games that will use this
+                opcode in tmp_ins && tmp_ins[this.N]();
+            },
+            0xE000 : () => opcode in this.ins && this.ins[this.NN],
+            0xF000 : () => opcode in this.ins && this.ins[this.NN],
+            0x000A : () =>                                                                      // Wait for keypress and set Vx
+            {
+                if (Object.keys(c8.keyStates).length < 1) return;
+                this.V[this.X] = c8.keyStates[Object.keys(c8.keyStates)[0]];
+            },
             0x00E0 : () => this.clearScreen,                                                    // 00E0: Clear display
-            0x00EE : () => this.PC = this.Stack[--this.SP],                                     // 00EE: Return subroutine
+            0x00EE : () => this.PC = this.stack[--this.SP],                                     // 00EE: Return subroutine
             0x1000 : () => this.PC = this.NNN,                                                  // 1NNN: Goto NNN
-            0x2000 : () => (this.Stack[this.SP++%0xC] = this.PC) && (this.PC = this.NNN),       // 2NNN: Call subroutine NNN
-            0x3000 : () => this.V[this.X] == this.NN && (this.PC+=2),                           // 3XNN: Skip if Vx == NN
-            0x4000 : () => this.V[this.X] != this.NN && (this.PC+=2),                           // 4XNN: Skip if Vx != NN
-            0x5000 : () => this.V[this.X] == this.V[this.Y] && (this.PC+=2),                    // 5XY0: Skip if Vx == Vy
+            0x2000 : () => (this.stack[this.SP++%0xC] = this.PC) && (this.PC = this.NNN),       // 2NNN: Call subroutine NNN
+            0x3000 : () => this.V[this.X] === this.NN && (this.PC+=2),                           // 3XNN: Skip if Vx == NN
+            0x4000 : () => this.V[this.X] !== this.NN && (this.PC+=2),                           // 4XNN: Skip if Vx != NN
+            0x5000 : () => this.V[this.X] === this.V[this.Y] && (this.PC+=2),                    // 5XY0: Skip if Vx == Vy
             0x6000 : () => this.V[this.X] = this.NN,                                            // 6XNN: Skip if Vx == NN
-            0x7000 : () => { this.V[this.X] += this.NN },                                       // 7XNN: Vx += NN
-            0x9000 : () => this.V[this.X] != this.V[this.Y] && (this.PC+=2),                    // 9XY0: Skip if Vx != Vy
+            0x7000 : () => this.V[this.X] += this.NN,                                           // 7XNN: Vx += NN
+            0x9000 : () => this.V[this.X] !== this.V[this.Y] && (this.PC+=2),                    // 9XY0: Skip if Vx != Vy
             0xA000 : () => this.I = this.NNN,                                                   // ANNN: I = NNN
-            0xB000 : () => this.PC = this.V[0] + this.NNN,                                      // BNNN: Goto V0 + NNN
+            0xB000 : () => this.PC = this.NNN + this.V[0],                                      // BNNN: Goto V0 + NNN
             0xC000 : () => this.V[this.X] = Math.round(Math.random() * this.NN) & this.NN,      // CXNN: Vx = random byte & NN
             0xD000 : () =>                                                                      // DXYN: Draw sprite
             {
                 this.VF = 0;
-                let spr;
+                let sprite;
 
-                for (let y1=0; y1<this.N; y1++)
+                for (let y=0; y<this.N; y++)
                 {
-                    spr = this.RAM[this.I+y1];
+                    sprite = this.RAM[this.I+y];
 
-                    for (let x1=0; x1<8; x1++)
+                    for (let x=0; x<8; x++)
                     {
-                        if (spr & 0x80 && this.flipPixel(this.V[this.X]+x1, this.V[this.Y]+y1))
+                        if ((sprite & 0x80) && this.flipPixel(this.V[this.X]+x, this.V[this.Y]+y))
                             this.VF = 1;
 
-                        spr <<= 1;
-                        this.drawFlag = true;
+                        sprite <<= 1;
                     }
                 }
             },
@@ -245,8 +273,8 @@ class Chip8
             0x0004 : () =>                                                                      // 8XY4: Vx += Vy, VF = carry | 0
             {
                 this.V[this.X] += this.V[this.Y];
-                this.VF = +(this.V[this.X] > 255);
-                if (this.V[this.X] > 255) this.V[this.X] -= 256;
+                this.VF = +(this.V[this.X] > 0xFF);
+                if (this.V[this.X] > 0xFF) this.V[this.X] -= 0x100;
             },
             0x0005 : () =>                                                                      // 8XY5: Vx -= Vy, VF |= borrow
             {
@@ -259,19 +287,13 @@ class Chip8
                 this.VF = this.V[this.X] & 0x1;
                 this.V[this.X] >>= 1;
             },
-            0x0007 : () =>                                                                      // 8XY7: Vx = Vy - Vx, VF = NOT borrow
-            {
-                // 8X07: Vx = delayTimer
-                if (this.NN == 0x0007) return (this.V[this.X] = this.DT);
-                this.VF = +(this.V[this.Y] > this.V[this.X]);
-                this.V[this.X] = this.V[this.Y] - this.V[this.X];
-                if (this.V[this.X] < 0) this.V[this.X] += 256;
-            },
+            0x0007 : () => this.V[this.X] = this.DT,                                            // 8XY7: Vx = Vy - Vx, VF = NOT borrow
             0x000E : () =>                                                                      // 8XYE: Vx = Vx SHL 1
             {
                 this.VF = +(this.V[this.X] & 0x80);
                 this.V[this.X] <<= 1;
-                if (this.V[this.X] > 255) this.V[this.X] -= 256;
+                if (this.V[this.X] > 255)
+                    this.V[this.X] -= 256;
             },
             0x009E : () => this.keyStates[this.V[this.X]]  && (this.PC+=2),                     // EX9E: Skip if Vx is pressed
             0x00A1 : () => !this.keyStates[this.V[this.X]] && (this.PC+=2),                     // EXA1: Skip if Vx is NOT pressed
@@ -285,34 +307,58 @@ class Chip8
             {
                 this.RAM[(this.I+0)&0xFFF] = (this.V[this.X]/100) % 10;
                 this.RAM[(this.I+1)&0xFFF] = (this.V[this.X]/10)  % 10;
-                this.RAM[(this.I+2)&0xFFF] = (this.V[this.X]/1)   % 10;
+                this.RAM[(this.I+2)&0xFFF] = this.V[this.X]       % 10;
             },
         };
 
-        var opcode = this.RAM[this.PC&0xFFF]*0x100 + this.RAM[(this.PC+1)&0xFFF];
+        let opcode = this.RAM[this.PC] << 8 | this.RAM[this.PC+1];
+
+        this.opcode = opcode;
 
         this.PC+=2;
 
-        this.N    = opcode & 0x000F;         // 4-bit
-        this.NN   = opcode & 0x00FF;         // 8-bit
+        this.N    = opcode & 0xF;            // 4-bit
+        this.NN   = opcode & 0xFF;           // 8-bit
         this.NNN  = opcode & 0xFFF;          // 12-bit
         this.NNNN = opcode & 0xFFFF;         // 16-bit
         this.X    = (opcode & 0x0F00) >> 8;  // 4-bit high
         this.Y    = (opcode & 0x00F0) >> 4;  // 4-bit low
 
-        var opc =  (opcode&0xF000) === 0x8000  && this.N  in this.ins && this.N
-                || (opcode&0xF000) === 0xE000  && this.NN in this.ins && this.NN
-                || (opcode&0xF000) === 0xF000  && this.NN in this.ins && this.NN
-                || (opcode&0xF000) === 0x0     && opcode  in this.ins && opcode
-                || (opcode&0xF000) in this.ins && (opcode & 0xF000);
+        let opc =  (opcode&0xF000) === 0x8000  && this.N  in this.ins && this.N
+            || (opcode&0xF000) === 0xE000  && this.NN in this.ins && this.NN
+            || (opcode&0xF000) === 0xF000  && this.NN in this.ins && this.NN
+            || (opcode&0xF000) === 0x0     && opcode  in this.ins && opcode
+            || (opcode&0xF000) in this.ins && (opcode & 0xF000);
+
+        this.instr = opc;
 
         if (typeof this.ins[opc] != "function")
-            throw Error("Undefined opcode: " + (opcode&0xF000).toString(16), this.playing = false);
+        {
+            this.playing = false;
+            throw Error("Undefined opcode: " + (opcode&0xF000).toString(16));
+        }
         else
         {
             this.VF = this.V[0xF];
             this.ins[opc]();
             this.V[0xF] = this.VF;
+
+            this.V0 = this.V[0x0];
+            this.V1 = this.V[0x1];
+            this.V2 = this.V[0x2];
+            this.V3 = this.V[0x3];
+            this.V4 = this.V[0x4];
+            this.V5 = this.V[0x5];
+            this.V6 = this.V[0x6];
+            this.V7 = this.V[0x7];
+            this.V8 = this.V[0x8];
+            this.V9 = this.V[0x9];
+            this.VA = this.V[0xA];
+            this.VB = this.V[0xB];
+            this.VC = this.V[0xC];
+            this.VD = this.V[0xD];
+            this.VE = this.V[0xE];
+            this.VF = this.V[0xF];
         }
     }
 
