@@ -343,22 +343,8 @@ class Chip8
             this.ins[opc]();
             this.V[0xF] = this.VF;
 
-            this.V0 = this.V[0x0];
-            this.V1 = this.V[0x1];
-            this.V2 = this.V[0x2];
-            this.V3 = this.V[0x3];
-            this.V4 = this.V[0x4];
-            this.V5 = this.V[0x5];
-            this.V6 = this.V[0x6];
-            this.V7 = this.V[0x7];
-            this.V8 = this.V[0x8];
-            this.V9 = this.V[0x9];
-            this.VA = this.V[0xA];
-            this.VB = this.V[0xB];
-            this.VC = this.V[0xC];
-            this.VD = this.V[0xD];
-            this.VE = this.V[0xE];
-            this.VF = this.V[0xF];
+            for (let i=0; i<0xF; i++)
+                this["V" + i.toString(16).toUpperCase()] = this.V[i];
         }
     }
 
